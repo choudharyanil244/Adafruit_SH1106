@@ -38,7 +38,10 @@ However, SH1106 driver don't provide several functions such as scroll commands.
 #include "Adafruit_SH1106.h"
 
 // the memory buffer for the LCD
+uint8_t *buffer; ///< Buffer data used for display buffer. Allocated when
+                   ///< begin method is called.
 
+/*
 static uint8_t buffer[SH1106_LCDHEIGHT * SH1106_LCDWIDTH / 8] = { 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -109,6 +112,20 @@ static uint8_t buffer[SH1106_LCDHEIGHT * SH1106_LCDWIDTH / 8] = {
 #endif
 #endif
 };
+*/
+
+
+#if defined(I2C_BUFFER_LENGTH)
+#define WIRE_MAX min(256, I2C_BUFFER_LENGTH) ///< Particle or similar Wire lib
+#elif defined(BUFFER_LENGTH)
+#define WIRE_MAX min(256, BUFFER_LENGTH) ///< AVR or similar Wire lib
+#elif defined(SERIAL_BUFFER_SIZE)
+#define WIRE_MAX                                                               \
+  min(255, SERIAL_BUFFER_SIZE - 1) ///< Newer Wire uses RingBuffer
+#else
+#define WIRE_MAX 32 ///< Use common Arduino core default
+#endif
+
 
 #define sh1106_swap(a, b) { int16_t t = a; a = b; b = t; }
 
@@ -152,13 +169,6 @@ Adafruit_SH1106::Adafruit_SH1106(int8_t SID, int8_t SCLK, int8_t DC, int8_t RST,
   hwSPI = false;
 }
 
-// constructor for hardware SPI - we indicate DataCommand, ChipSelect, Reset 
-Adafruit_SH1106::Adafruit_SH1106(int8_t DC, int8_t RST, int8_t CS) : Adafruit_GFX(SH1106_LCDWIDTH, SH1106_LCDHEIGHT) {
-  dc = DC;
-  rst = RST;
-  cs = CS;
-  hwSPI = true;
-}
 
 // initializer for I2C - we only indicate the reset pin!
 Adafruit_SH1106::Adafruit_SH1106(int8_t reset) :
@@ -168,7 +178,19 @@ Adafruit_GFX(SH1106_LCDWIDTH, SH1106_LCDHEIGHT) {
 }
   
 
+Adafruit_SH1106::~Adafruit_SH1106(void) {
+  if (buffer) {
+    free(buffer);
+    buffer = NULL;
+  }
+}
+
+
 void Adafruit_SH1106::begin(uint8_t vccstate, uint8_t i2caddr, bool reset) {
+
+   //if ((!buffer) && !(buffer = (uint8_t *)malloc((SH1106_LCDWIDTH*((SH1106_LCDHEIGHT+7)/8))))
+  buffer = (uint8_t *)malloc((SH1106_LCDWIDTH*((SH1106_LCDHEIGHT+7)/8)));
+  clearDisplay();
   _vccstate = vccstate;
   _i2caddr = i2caddr;
 
@@ -224,40 +246,6 @@ void Adafruit_SH1106::begin(uint8_t vccstate, uint8_t i2caddr, bool reset) {
     // turn on VCC (9V?)
   }
 
-   #if defined SH1106_128_32
-    // Init sequence for 128x32 OLED module
-    SH1106_command(SH1106_DISPLAYOFF);                    // 0xAE
-    SH1106_command(SH1106_SETDISPLAYCLOCKDIV);            // 0xD5
-    SH1106_command(0x80);                                  // the suggested ratio 0x80
-    SH1106_command(SH1106_SETMULTIPLEX);                  // 0xA8
-    SH1106_command(0x1F);
-    SH1106_command(SH1106_SETDISPLAYOFFSET);              // 0xD3
-    SH1106_command(0x0);                                   // no offset
-    SH1106_command(SH1106_SETSTARTLINE | 0x0);            // line #0 
-    SH1106_command(SH1106_CHARGEPUMP);                    // 0x8D
-    if (vccstate == SH1106_EXTERNALVCC) 
-      { SH1106_command(0x10); }
-    else 
-      { SH1106_command(0x14); }
-    SH1106_command(SH1106_MEMORYMODE);                    // 0x20
-    SH1106_command(0x00);                                  // 0x0 act like ks0108
-    SH1106_command(SH1106_SEGREMAP | 0x1);
-    SH1106_command(SH1106_COMSCANDEC);
-    SH1106_command(SH1106_SETCOMPINS);                    // 0xDA
-    SH1106_command(0x02);
-    SH1106_command(SH1106_SETCONTRAST);                   // 0x81
-    SH1106_command(0x8F);
-    SH1106_command(SH1106_SETPRECHARGE);                  // 0xd9
-    if (vccstate == SH1106_EXTERNALVCC) 
-      { SH1106_command(0x22); }
-    else 
-      { SH1106_command(0xF1); }
-    SH1106_command(SH1106_SETVCOMDETECT);                 // 0xDB
-    SH1106_command(0x40);
-    SH1106_command(SH1106_DISPLAYALLON_RESUME);           // 0xA4
-    SH1106_command(SH1106_NORMALDISPLAY);                 // 0xA6
-  #endif
-
   #if defined SH1106_128_64
     // Init sequence for 128x64 OLED module
     SH1106_command(SH1106_DISPLAYOFF);                    // 0xAE
@@ -285,43 +273,6 @@ void Adafruit_SH1106::begin(uint8_t vccstate, uint8_t i2caddr, bool reset) {
       { SH1106_command(0x9F); }
     else 
       { SH1106_command(0xCF); }
-    SH1106_command(SH1106_SETPRECHARGE);                  // 0xd9
-    if (vccstate == SH1106_EXTERNALVCC) 
-      { SH1106_command(0x22); }
-    else 
-      { SH1106_command(0xF1); }
-    SH1106_command(SH1106_SETVCOMDETECT);                 // 0xDB
-    SH1106_command(0x40);
-    SH1106_command(SH1106_DISPLAYALLON_RESUME);           // 0xA4
-    SH1106_command(SH1106_NORMALDISPLAY);                 // 0xA6
-  #endif
-  
-  #if defined SH1106_96_16
-    // Init sequence for 96x16 OLED module
-    SH1106_command(SH1106_DISPLAYOFF);                    // 0xAE
-    SH1106_command(SH1106_SETDISPLAYCLOCKDIV);            // 0xD5
-    SH1106_command(0x80);                                  // the suggested ratio 0x80
-    SH1106_command(SH1106_SETMULTIPLEX);                  // 0xA8
-    SH1106_command(0x0F);
-    SH1106_command(SH1106_SETDISPLAYOFFSET);              // 0xD3
-    SH1106_command(0x00);                                   // no offset
-    SH1106_command(SH1106_SETSTARTLINE | 0x0);            // line #0
-    SH1106_command(SH1106_CHARGEPUMP);                    // 0x8D
-    if (vccstate == SH1106_EXTERNALVCC) 
-      { SH1106_command(0x10); }
-    else 
-      { SH1106_command(0x14); }
-    SH1106_command(SH1106_MEMORYMODE);                    // 0x20
-    SH1106_command(0x00);                                  // 0x0 act like ks0108
-    SH1106_command(SH1106_SEGREMAP | 0x1);
-    SH1106_command(SH1106_COMSCANDEC);
-    SH1106_command(SH1106_SETCOMPINS);                    // 0xDA
-    SH1106_command(0x2);	//ada x12
-    SH1106_command(SH1106_SETCONTRAST);                   // 0x81
-    if (vccstate == SH1106_EXTERNALVCC) 
-      { SH1106_command(0x10); }
-    else 
-      { SH1106_command(0xAF); }
     SH1106_command(SH1106_SETPRECHARGE);                  // 0xd9
     if (vccstate == SH1106_EXTERNALVCC) 
       { SH1106_command(0x22); }
@@ -551,14 +502,29 @@ void Adafruit_SH1106::display(void) {
     		uint8_t twbrbackup = TWBR;
     		TWBR = 12; // upgrade to 400KHz!
 	#endif
-	
+
+	//uint16_t count = SH1106_LCDWIDTH * ((SH1106_LCDHEIGHT + 7) / 8);
+      //uint8_t *ptr = buffer;
+
 	for ( i = 0; i < height; i++) {
 		
 		// send a bunch of data in one xmission
         SH1106_command(0xB0 + i + m_row);//set page address
         SH1106_command(m_col & 0xf);//set lower column address
         SH1106_command(0x10 | (m_col >> 4));//set higher column address
-		
+	
+	/*uint16_t bytesOut = 1;
+    while (count--) {
+      if (bytesOut >= WIRE_MAX) {
+        Wire.endTransmission();
+        Wire.beginTransmission(_i2caddr);
+        Wire.write(0x40);
+        bytesOut = 1;
+      }
+      Wire.write(*ptr++);
+      bytesOut++;
+    }*/
+	
         for( j = 0; j < 8; j++){        
 			Wire.beginTransmission(_i2caddr);
             Wire.write(0x40);
@@ -642,7 +608,7 @@ void Adafruit_SH1106::display(void) {
 */
 // clear everything
 void Adafruit_SH1106::clearDisplay(void) {
-  memset(buffer, 0, (SH1106_LCDWIDTH*SH1106_LCDHEIGHT/8));
+  memset(buffer, 0, (SH1106_LCDWIDTH*((SH1106_LCDHEIGHT+7)/8)));
 }
 
 
